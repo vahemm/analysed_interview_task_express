@@ -18,11 +18,9 @@ const databaseConfig = () => ({
     entities: [
         City,
         Person,
-        Company
     ],
     migrations: [
         City1689872718847,
-        Company1689873160505,
         Person1689873177423
     ],
     subscribers: ['dist/subscriber/**/*.js'],

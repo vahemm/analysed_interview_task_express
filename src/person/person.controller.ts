@@ -28,7 +28,7 @@ class PersonController implements Controller {
         this.router.post(this.path, validationMiddleware(CreatePersonDto), this.createPerson);
         this.router.get(this.path, this.getAllPersons);
         this.router.get(`${this.path}/:id`, this.getPersonById);
-        this.router.put(`${this.path}/:id`, validationMiddleware(CreatePersonDto), this.updatePerson);
+        this.router.put(`${this.path}/:id`, validationMiddleware(CreatePersonDto), this.updatePersonAddress);
         this.router.delete(`${this.path}/:id`, this.deletePerson);
     }
 
@@ -40,8 +40,16 @@ class PersonController implements Controller {
             next(new CityNotFoundException(personData.living));
         }
 
-        const createNodeQuery = `CREATE (n:Person {name: $name, population:$population}) RETURN n`;
-        const ifExistNodeQuery = `MATCH (n:Person {name: $name}) RETURN n`;
+        const createNodeQuery = `
+        MATCH (city:City {name: $living}) 
+        CREATE (n:Person {
+        first_name: $first_name, 
+        last_name:$last_name,
+        age:$age,
+        sex: $sex
+        }) -[:Living]-> (city) 
+        RETURN n`;
+        const ifExistNodeQuery = `MATCH (n:Person {first_name: $first_name, last_name: $last_name}) RETURN n`;
         const parameters = {
             first_name: personData.first_name,
             last_name: personData.last_name,
@@ -106,17 +114,22 @@ class PersonController implements Controller {
         }
     }
 
-    private updatePerson = async (request: any, response: express.Response, next: express.NextFunction) => {
+    private updatePersonAddress = async (request: any, response: express.Response, next: express.NextFunction) => {
         const body = request.body;
         const id = request.params.id;
 
 
-        const updateNodeQuery = `MATCH (city:City {name: $name}) 
-        SET city.population = $population
-        RETURN city`;
+        const updateNodeQuery = `MATCH (city:City {name: $living})
+        MATCH (person:Person {first_name: $first_name, last_name: $last_name})-[r1:Living]->() 
+        CREATE (person)-[r2:Living]->(city)       
+        DELETE r1
+        RETURN person`;
         const parameters = {
-            name: body.name,
-            population: body.population,
+            first_name: body.first_name,
+            last_name: body.last_name,
+            age: body.age,
+            sex: body.sex,
+            living: body.living
         };
         const session = this.driver.session();
 
@@ -124,11 +137,14 @@ class PersonController implements Controller {
 
         if (updateRes.records.length > 0) {
             session.close();
-            await this.cityRepository.createQueryBuilder()
+            const city = await this.cityRepository.findOne({where: {name: body.living}});
+            if (!city) {
+                next(new CityNotFoundException(body.living));
+            }
+
+            await this.personRepository.createQueryBuilder()
                 .update(Person)
-                .set({
-                    ...body
-                })
+                .set({living: city.id})
                 .where("id = :id", {id})
                 .execute();
         }
@@ -138,12 +154,19 @@ class PersonController implements Controller {
     private deletePerson = async (request: express.Request, response: express.Response, next: express.NextFunction) => {
         const id = request.params.id;
 
-        const deleteNodeQuery = `MATCH(city:City {name: $name})
-         WITH city, city.name AS name
-         DETACH DELETE city
-         RETURN name`;
+        const person = await this.personRepository.findOne({where: {id}});
+        if (!person) {
+            next(new CityNotFoundException(person.id));
+        }
+
+
+        const deleteNodeQuery = `MATCH(person:Person {first_name: $first_name, last_name: $last_name})
+         WITH person, person.first_name AS first_name
+         DETACH DELETE person
+         RETURN first_name`;
         const parameters = {
-            name,
+            first_name: person.first_name,
+            last_name: person.last_name,
         };
         const session = this.driver.session();
 
